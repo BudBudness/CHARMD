@@ -1,0 +1,29 @@
+name: G1 discovery prototype tests
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [chore/github-agent-bootstrap]
+permissions:
+  contents: read
+jobs:
+  deterministic-prototypes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run ledger and import-security tests
+        working-directory: experiments
+        run: |
+          python -m unittest discover -s g1-f-ledger -p 'test_*.py' -v
+          python -m unittest discover -s g1-g-security -p 'test_*.py' -v
+      - name: Run plugin manifest contract tests
+        working-directory: experiments/g1-c-plugin
+        run: python -m unittest -v
+      - name: Generate mastering golden signals
+        working-directory: experiments/g1-d-mastering
+        run: |
+          python generate_fixtures.py
+          python -c "import json,pathlib; p=pathlib.Path('fixtures/manifest.json'); d=json.loads(p.read_text()); assert len(d['fixtures']) == 6; assert all(len(x['sha256']) == 64 for x in d['fixtures']); print('PASS: six deterministic WAV fixtures generated with SHA-256')"
