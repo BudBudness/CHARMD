@@ -16,6 +16,10 @@ class LedgerTests(unittest.TestCase):
         x=Ledger(100); x.reserve("job1","k1",10)
         with self.assertRaises(IdempotencyConflict): x.reserve("job2","k1",10)
 
+    def test_operation_id_cannot_be_reused_with_new_key(self):
+        x=Ledger(100); x.reserve("job1","k1",10)
+        with self.assertRaises(IdempotencyConflict): x.reserve("job1","k2",10)
+
     def test_concurrent_reservations_never_overdraw(self):
         x=Ledger(100)
         def attempt(i):
