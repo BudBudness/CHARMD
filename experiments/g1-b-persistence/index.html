@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHARMD G1-B Persistence Spike</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#111827;color:#e5e7eb}body{max-width:850px;margin:2rem auto;padding:0 1rem}button,input{font:inherit;padding:.65rem;margin:.25rem;border-radius:.4rem}button{cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1220;padding:1rem;border-radius:.5rem}.ok{color:#86efac}.bad{color:#fca5a5}
+</style></head>
+<body>
+<h1>G1-B · Project persistence spike</h1>
+<p>Local-only IndexedDB/OPFS experiment. No network calls, analytics or uploads. Use disposable test data.</p>
+<label>Project name <input id="name" value="Persistence test"></label>
+<button id="save">Commit revision</button><button id="reload">Reload latest</button><button id="fail">Inject failed transaction</button><button id="asset">Write and verify OPFS asset</button><button id="export">Export project JSON</button>
+<pre id="out">Ready. This page stores test data in this browser origin.</pre>
+<script>
+"use strict";
+const DB="charmd-g1b-spike", STORE="revisions";
+const out=document.querySelector("#out");
+const log=(s,ok=true)=>{out.textContent += "\n"+(ok?"PASS ":"INFO ")+s};
+function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE,{keyPath:"revision"});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+async function commit(project){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put(project);tx.oncomplete=()=>{db.close();resolve()};tx.onerror=()=>{const e=tx.error;db.close();reject(e)};tx.onabort=()=>{const e=tx.error;db.close();reject(e)}})}
+async function latest(){const db=await openDb();return new Promise((resolve,reject)=>{const tx=db.transaction(STORE,"readonly"),r=tx.objectStore(STORE).openCursor(null,"prev");r.onsuccess=()=>{const c=r.result;db.close();resolve(c?c.value:null)};r.onerror=()=>{db.close();reject(r.error)}})}
+async function save(){try{const previous=await latest();const p={schemaVersion:1,revision:(previous?.revision||0)+1,project:{id:"g1b-test-project",name:document.querySelector("#name").value,updatedAt:new Date().toISOString(),sampleRate:48000,tempo:120,timeSignature:[4,4]},tracks:[],assets:[]};await commit(p);log("Committed revision "+p.revision); }catch(e){log("Commit failed: "+e.name+" "+e.message,false)}}
+async function reload(){try{const p=await latest();if(!p){log("No committed revision found",false);return}document.querySelector("#name").value=p.project.name;log("Recovered revision "+p.revision+"; schema "+p.schemaVersion)}catch(e){log("Reload failed: "+e,false)}}
+async function injectFailure(){try{const db=await openDb();await new Promise(resolve=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).put({revision:999999,project:{name:"must-not-commit"}});tx.abort();tx.onabort=resolve;tx.onerror=resolve});db.close();const p=await latest();if(p?.revision===999999)log("FAIL: aborted revision visible",false);else log("Abort preserved latest committed revision "+(p?.revision??"none"))}catch(e){log("Failure injection: "+e,false)}}
+async function opfs(){try{if(!navigator.storage?.getDirectory){log("OPFS unsupported in this browser",false);return}const root=await navigator.storage.getDirectory(),handle=await root.getFileHandle("g1b-probe.bin",{create:true}),bytes=new Uint8Array(4096);crypto.getRandomValues(bytes);const w=await handle.createWritable();await w.write(bytes);await w.close();const read=new Uint8Array(await (await handle.getFile()).arrayBuffer());let same=read.length===bytes.length;for(let i=0;same&&i<bytes.length;i++)same=read[i]===bytes[i];log("OPFS round-trip "+(same?"verified":"MISMATCH")+" ("+read.length+" bytes)",same)}catch(e){log("OPFS failed: "+e.name+" "+e.message,false)}}
+async function exportProject(){try{const p=await latest();if(!p){log("Nothing to export",false);return}const a=document.createElement("a"),u=URL.createObjectURL(new Blob([JSON.stringify(p,null,2)],{type:"application/json"}));a.href=u;a.download="charmd-g1b-project.json";a.click();URL.revokeObjectURL(u);log("Exported latest project manifest")}catch(e){log("Export failed: "+e,false)}}
+document.querySelector("#save").onclick=save;document.querySelector("#reload").onclick=reload;document.querySelector("#fail").onclick=injectFailure;document.querySelector("#asset").onclick=opfs;document.querySelector("#export").onclick=exportProject;
+(async()=>{try{const p=await latest();out.textContent="Origin: "+location.origin+"\nStorage estimate: "+JSON.stringify(await navigator.storage?.estimate?.()||{});log("Existing latest revision: "+(p?.revision??"none"))}catch(e){log("Initialization failed: "+e,false)}})();
+</script></body></html>
