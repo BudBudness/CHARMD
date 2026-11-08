@@ -62,6 +62,8 @@ class Ledger:
                 if existing.reserved != amount: raise IdempotencyConflict("amount differs on replay")
                 return existing
             if amount > self.balance: raise InsufficientCredits()
+            if operation_id in self.reservations:
+                raise IdempotencyConflict("operation ID already exists with another key")
             r = Reservation(operation_id, key, amount)
             self.reservations[operation_id] = r
             self.keys[key] = operation_id
