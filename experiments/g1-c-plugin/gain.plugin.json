@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 1,
+  "pluginId": "org.charmd.prototype.gain",
+  "version": "0.1.0",
+  "name": "Prototype Gain",
+  "kind": "audio-effect",
+  "entry": "gain.wasm",
+  "audio": {
+    "inputs": 2,
+    "outputs": 2,
+    "supportedSampleRates": [44100, 48000],
+    "maximumBlockFrames": 2048,
+    "reportedLatencyFrames": 0
+  },
+  "parameters": [
+    {
+      "id": "gain",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "unit": "linear",
+      "automatable": true
+    }
+  ],
+  "stateVersion": 1,
+  "capabilities": []
+}

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHARMD G1-A Mobile Audio Benchmark</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#10151b;color:#edf2f7}body{max-width:900px;margin:auto;padding:20px}h1{font-size:1.5rem}p,small{color:#b7c2ce}.panel{background:#1b2530;border:1px solid #354454;border-radius:10px;padding:14px;margin:12px 0}label{display:block;margin:10px 0}input,select,button{font:inherit;padding:9px;border-radius:6px;border:1px solid #607080;background:#111b25;color:#fff}button{margin:5px 5px 5px 0}button:disabled{opacity:.4}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.metric{font-size:1.3rem;font-weight:650}.muted{color:#a9bac9}pre{white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<h1>CHARMD · G1-A Mobile Audio Benchmark</h1>
+<p>Isolated synthetic browser-audio stress harness. This is not the DAW engine and does not certify audible glitch-free playback.</p>
+<div class="panel">
+ <div class="grid">
+  <label>Voice / track count <select id="tracks"><option>4</option><option>8</option><option selected>16</option><option>24</option><option>32</option><option>48</option><option>64</option><option>96</option></select></label>
+  <label>Test duration (minutes) <select id="duration"><option value="1">1</option><option value="3" selected>3</option><option value="5">5</option><option value="10">10</option></select></label>
+  <label>Signal <select id="signal"><option value="tone">Sine voices</option><option value="noise">Noise buffers</option></select></label>
+  <label>Sample rate <select id="rate"><option value="default" selected>Browser default</option><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>
+ </div>
+ <button id="start">Start benchmark</button><button id="stop" disabled>Stop and export</button>
+ <p class="muted">Use headphones at a safe volume. Do not run while driving. Keep the screen awake and record whether the test was foreground, backgrounded, or interrupted.</p>
+</div>
+<div class="panel">
+ <div class="grid">
+  <div>Context state<div class="metric" id="state">Not started</div></div>
+  <div>Elapsed<div class="metric" id="elapsed">0 s</div></div>
+  <div>Heartbeat max delay<div class="metric" id="drift">—</div></div>
+  <div>Audio base latency<div class="metric" id="latency">—</div></div>
+  <div>Output latency<div class="metric" id="output">—</div></div>
+  <div>State interruptions<div class="metric" id="interruptions">0</div></div>
+ </div>
+ <p id="notes" class="muted">No test running.</p>
+</div>
+<div class="panel"><b>Event log</b><pre id="log">Ready.</pre></div>
+<div class="panel"><b>Required manual observations</b>
+<ul><li>Device model, Android/iOS version, browser and browser version.</li><li>Power mode, battery level, output route (speaker/wired/Bluetooth), and whether screen stayed on.</li><li>Any audible clicks, dropouts, silence, distortion, overheating or unexpected pause.</li><li>Repeat at least three times per device and configuration.</li></ul>
+</div>
+<script>
+(() => {
+ const $=id=>document.getElementById(id);
+ let ctx=null,nodes=[],started=0,timer=null,heartbeat=null,lastBeat=0,maxDrift=0,interruptions=0,events=[],testConfig=null;
+ const log=(message)=>{const stamp=new Date().toISOString();events.push(stamp+" "+message);$("log").textContent=events.slice(-80).join("\n");};
+ const setState=()=>{if(!ctx)return;$("state").textContent=ctx.state;};
+ async function start(){
+  $("start").disabled=true;events=[];interruptions=0;maxDrift=0;
+  testConfig={tracks:Number($("tracks").value),durationMinutes:Number($("duration").value),signal:$("signal").value,requestedSampleRate:$("rate").value,startedAt:new Date().toISOString(),userAgent:navigator.userAgent,platform:navigator.platform,screen:{width:screen.width,height:screen.height,dpr:devicePixelRatio},visibility:document.visibilityState};
+  try{
+   const opts={latencyHint:"interactive"};if(testConfig.requestedSampleRate!=="default")opts.sampleRate=Number(testConfig.requestedSampleRate);
+   ctx=new AudioContext(opts);await ctx.resume();setState();
+   ctx.addEventListener("statechange",()=>{setState();log("AudioContext state: "+ctx.state);if(ctx.state!=="running")interruptions++;$("interruptions").textContent=String(interruptions);});
+   const master=ctx.createGain();master.gain.value=0.12;master.connect(ctx.destination);
+   const buffer=ctx.createBuffer(1,ctx.sampleRate*2,ctx.sampleRate);const data=buffer.getChannelData(0);
+   if(testConfig.signal==="noise"){let seed=17;for(let i=0;i<data.length;i++){seed=(seed*16807)%2147483647;data[i]=(seed/1073741823.5-1)*0.12;}}
+   else {for(let i=0;i<data.length;i++)data[i]=Math.sin(2*Math.PI*220*i/ctx.sampleRate)*0.12;}
+   const now=ctx.currentTime+0.15;
+   for(let i=0;i<testConfig.tracks;i++){
+    const src=ctx.createBufferSource();src.buffer=buffer;src.loop=true;
+    const gain=ctx.createGain();gain.gain.value=1/Math.sqrt(testConfig.tracks);
+    const pan=ctx.createStereoPanner();pan.pan.value=(i%2===0?-1:1)*(0.2+(i%5)*0.15);
+    src.connect(gain).connect(pan).connect(master);src.start(now);nodes.push(src);
+   }
+   started=performance.now();lastBeat=started;
+   $("latency").textContent=Number.isFinite(ctx.baseLatency)?(ctx.baseLatency*1000).toFixed(1)+" ms":"n/a";
+   $("output").textContent=Number.isFinite(ctx.outputLatency)?(ctx.outputLatency*1000).toFixed(1)+" ms":"n/a";
+   $("notes").textContent="Running synthetic "+testConfig.signal+" workload: "+testConfig.tracks+" looping buffer voices.";
+   log("Started: "+JSON.stringify(testConfig));$("stop").disabled=false;
+   heartbeat=setInterval(()=>{const nowp=performance.now();const delay=Math.max(0,nowp-lastBeat-250);maxDrift=Math.max(maxDrift,delay);lastBeat=nowp;$("drift").textContent=maxDrift.toFixed(1)+" ms";$("elapsed").textContent=((nowp-started)/1000).toFixed(0)+" s";if(ctx)$("state").textContent=ctx.state;},250);
+   timer=setTimeout(stop,testConfig.durationMinutes*60000);
+  }catch(e){log("START ERROR: "+e.name+" "+e.message);$("notes").textContent="Could not start: "+e.message;cleanupUI();}
+ }
+ async function stop(){
+  if(!ctx)return;
+  clearInterval(heartbeat);clearTimeout(timer);
+  const elapsedMs=performance.now()-started;
+  for(const n of nodes){try{n.stop();}catch{}}
+  nodes=[];
+  const result={configuration:testConfig,finishedAt:new Date().toISOString(),elapsedSeconds:Number((elapsedMs/1000).toFixed(2)),contextState:ctx.state,actualSampleRate:ctx.sampleRate,baseLatencySeconds:ctx.baseLatency??null,outputLatencySeconds:ctx.outputLatency??null,heartbeatMaxDelayMs:Number(maxDrift.toFixed(2)),contextStateChangeCount:interruptions,visibilityAtEnd:document.visibilityState,events};
+  log("Stopped. Exporting JSON result.");
+  const blob=new Blob([JSON.stringify(result,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="charmd-g1a-"+Date.now()+".json";a.click();URL.revokeObjectURL(url);
+  try{await ctx.close();}catch{}ctx=null;$("notes").textContent="Finished. JSON evidence downloaded. Record audible observations separately.";cleanupUI();
+ }
+ function cleanupUI(){$("start").disabled=false;$("stop").disabled=true;$("state").textContent=ctx?ctx.state:"Closed";}
+ document.addEventListener("visibilitychange",()=>log("Document visibility: "+document.visibilityState));
+ window.addEventListener("pagehide",()=>log("Page hide event"));
+ $("start").addEventListener("click",start);$("stop").addEventListener("click",stop);
+})();
+</script>
+</body></html>
